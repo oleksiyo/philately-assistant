@@ -1,0 +1,20 @@
+[project]
+name = "philately-assistant"
+version = "0.1.0"
+description = "RAG chatbot / reference assistant for stamp collectors (LLM Zoomcamp capstone)"
+requires-python = ">=3.11"
+dependencies = [
+    "python-dotenv",
+    "requests",
+    "wikipedia-api",
+    "tqdm",
+    "pandas",
+    "openai",
+    "minsearch",
+    "streamlit",
+    "psycopg2-binary",
+    "scikit-learn",
+]
+
+[tool.uv]
+package = false

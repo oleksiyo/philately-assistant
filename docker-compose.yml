@@ -1,0 +1,36 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-philately}
+      POSTGRES_USER: ${POSTGRES_USER:-philately}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-philately}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+    volumes:
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - postgres
+
+  # app service: uncomment once a Dockerfile exists
+  # app:
+  #   build: .
+  #   env_file: .env
+  #   ports:
+  #     - "8501:8501"
+  #   depends_on:
+  #     - postgres
+
+volumes:
+  postgres_data:
+  grafana_data:
