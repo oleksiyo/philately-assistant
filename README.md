@@ -93,6 +93,7 @@ philately_assistant/
 │   ├── db.py                  # Postgres logging (conversations + feedback)
 │   └── grafana/               # datasource + dashboard provisioning
 ├── data/                      # generated corpus, embeddings cache, eval results (gitignored except results)
+├── deploy/                    # AWS EC2 deploy/teardown scripts (untested, see Cloud Deployment)
 ├── docs/                      # course requirements + project plan
 ├── Dockerfile
 ├── docker-compose.yml
@@ -231,14 +232,36 @@ All dependency versions are pinned in `uv.lock`. `data/chunks.jsonl` and `data/e
 
 ## Cloud Deployment
 
-Not implemented — the project runs locally/self-hosted via `docker compose up`. The `app` service is a stateless container (all state lives in Postgres), so it would deploy to any container host (ECS/Fargate, Cloud Run, a single EC2/Lightsail instance via `docker compose`) without changes beyond pointing `POSTGRES_*` env vars at a managed database. Not attempted here for scope reasons — this is the one bonus criterion left on the table.
+Scripts (`deploy/`) provision a single AWS EC2 instance and run the exact same `docker-compose.yml` stack on it — no separate cloud-specific config, since the app is already fully containerized.
+
+> **Disclosure:** these scripts were written and reviewed against the AWS CLI docs (every subcommand/flag checked against `--generate-cli-skeleton`) but **not run against a live AWS account** — treat as a documented, ready-to-use deployment path rather than a verified one.
+
+**Prerequisites:** AWS CLI configured (`aws configure`), an existing EC2 key pair (`.pem` file in the repo root), `.env` filled in.
+
+```bash
+./deploy/deploy.sh my-key-pair-name        # optional 2nd arg: instance type, default t3.small
+```
+
+What it does:
+1. Looks up the latest Ubuntu 24.04 AMI and launches an EC2 instance running `deploy/user-data.sh` (installs Docker + the Compose plugin on first boot)
+2. Creates a security group opening ports 22 (SSH), 8501 (app), 3001 (Grafana) — tighten `--cidr` in `deploy/deploy.sh` for anything beyond a demo
+3. Waits for SSH + cloud-init, then `rsync`s the repo over
+4. Runs the corpus build once via the `ingest` Compose profile (no local Python/uv needed on the instance): `docker compose --profile ingest run --rm ingest`
+5. Starts everything: `docker compose up -d --build`
+
+Prints the public app/Grafana URLs when done. **Tear down when you're finished to stop billing:**
+```bash
+./deploy/teardown.sh
+```
+
+A `t3.small` runs roughly $0.02/hour — remember to tear down; nothing here auto-stops the instance.
 
 ## Best practices / bonus criteria
 
 - ✅ **Hybrid search** implemented and evaluated (`rag/retrieval.py`, RRF) — see [Retrieval evaluation](#retrieval-evaluation)
 - ✅ **Document re-ranking** implemented and evaluated (`rag/rerank.py`, cross-encoder) — on by default, clear win — see [Re-ranking & query rewriting](#re-ranking--query-rewriting-best-practice-bonuses)
 - ✅ **Query rewriting** implemented and evaluated (`rag/query_rewrite.py`) — toggleable, off by default per eval results — see [Re-ranking & query rewriting](#re-ranking--query-rewriting-best-practice-bonuses)
-- ⬜ Cloud deployment — not implemented, see [Cloud Deployment](#cloud-deployment)
+- 🟡 **Cloud deployment** scripted (`deploy/`, AWS EC2 + the same `docker-compose.yml`) but **not run against a live AWS account** — see [Cloud Deployment](#cloud-deployment)
 
 ## Legal note
 

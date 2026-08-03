@@ -36,6 +36,16 @@ services:
     depends_on:
       - postgres
 
+  # One-off corpus build, e.g. on a fresh cloud host with no local uv/python:
+  #   docker compose --profile ingest run --rm ingest
+  ingest:
+    build: .
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+    command: ["uv", "run", "python", "ingestion/ingest.py"]
+    profiles: ["ingest"]
+
 volumes:
   postgres_data:
   grafana_data:

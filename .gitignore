@@ -12,3 +12,4 @@ data/raw/
 .dlt/
 .DS_Store
 .ipynb_checkpoints/
+*.pem
