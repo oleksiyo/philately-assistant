@@ -1,0 +1,21 @@
+# Credentials here must match POSTGRES_DB/USER/PASSWORD in .env — Grafana
+# provisioning files aren't env-substituted by docker-compose, so if you
+# change those in .env, update them here too.
+apiVersion: 1
+
+datasources:
+  - name: Postgres
+    type: postgres
+    uid: philately_postgres
+    access: proxy
+    url: postgres:5432
+    database: philately
+    user: philately
+    isDefault: true
+    editable: true
+    jsonData:
+      sslmode: disable
+      postgresVersion: 1600
+      timescaledb: false
+    secureJsonData:
+      password: philately

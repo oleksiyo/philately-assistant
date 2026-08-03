@@ -1,31 +1,185 @@
 # Philately Assistant
 
-A RAG chatbot / reference assistant for stamp collectors. Capstone project for [LLM Zoomcamp](https://github.com/DataTalksClub/llm-zoomcamp).
+A RAG (Retrieval-Augmented Generation) chatbot / reference assistant for stamp collectors (philatelists). Capstone project for [LLM Zoomcamp](https://github.com/DataTalksClub/llm-zoomcamp).
 
-> Work in progress. This README will be expanded with an app description, run instructions, evaluation results, and screenshots — see the requirements in `docs/project.md`.
+## Problem description
 
-## Documentation
+Stamp collecting has a lot of specialized vocabulary (perforation, watermarks, tête-bêche, plating, cancellation...), plus decades of country-specific stamp-issue history and catalog systems (Scott, Yvert, Michel...). That information is scattered across dozens of sites, forums and glossaries and is hard to search.
 
-- [`docs/project-plan.md`](docs/project-plan.md) — plan: data, architecture, evaluation, monitoring, grading criteria.
-- [`CLAUDE.md`](CLAUDE.md) — context and workflow for the agent/developer.
+Philately Assistant lets you ask a natural-language question — *"what is a tête-bêche pair"*, *"what stamps did France issue in the 1900s"* — and get an answer grounded in a corpus of Wikipedia philately articles, with links to the source articles used. If the corpus doesn't actually contain the answer, the assistant says so instead of guessing.
+
+## Dataset
+
+Ingested automatically from the **Wikipedia API** (`ingestion/ingest.py`), starting from three categories and recursing two levels into subcategories:
+
+- `Category:Philately`
+- `Category:Postage stamps by country`
+- `Category:Compendium of postage stamp issuers`
+
+Current corpus: **400 articles → 3,941 chunks** (chunked by section, then by paragraph groups up to ~1,200 characters), stored as `data/chunks.jsonl` with `{chunk_id, title, section, url, text}`. Content is CC BY-SA (Wikipedia) — see [Legal note](#legal-note).
+
+**Known coverage gap**: the crawl is capped at 400 articles for corpus-size reasons, so some specific terminology (e.g. "tête-bêche" as its own article) isn't present — the assistant correctly declines to answer those rather than hallucinating (see [LLM evaluation](#llm-evaluation)).
+
+## Architecture
+
+```
+Wikipedia API
+      │
+      ▼
+ingestion/ingest.py  (category crawl → clean → chunk)
+      │
+      ▼
+data/chunks.jsonl
+      │
+      ├──────────────┐
+      ▼              ▼
+keyword index    vector index
+(minsearch.Index) (minsearch.VectorSearch +
+                   sentence-transformers,
+                   local, no API key needed)
+      │              │
+      └──────┬───────┘
+             ▼
+   rag/retrieval.py — keyword / vector / hybrid (RRF)
+             │
+             ▼
+   rag/prompt.py — "strict" vs "open" system prompt
+             │
+             ▼
+   rag/llm.py — OpenAI chat completion (gpt-4o-mini)
+             │
+             ▼
+   app/streamlit_app.py ──► answer + sources
+             │
+             ▼
+   monitoring/db.py → Postgres (conversations + 👍/👎)
+             │
+             ▼
+   Grafana dashboard (7 charts)
+```
+
+## Retrieval evaluation
+
+Methodology (`eval/generate_golden.py`, `eval/retrieval_eval.py`):
+
+1. Sampled 200 chunks (prose-only, filtering out list/index pages) and asked an LLM to generate one natural-language question per chunk → `data/golden_qa.jsonl`.
+2. Compared **3 retrieval approaches** — keyword-only (`minsearch.Index`), vector-only (`minsearch.VectorSearch` + `all-MiniLM-L6-v2` embeddings), and hybrid (Reciprocal Rank Fusion of the two) — at `top_k=5`, matching what the production pipeline actually retrieves.
+3. Metrics: hit-rate and MRR.
+
+| method | hit-rate | MRR |
+|---|---|---|
+| keyword | 0.740 | 0.540 |
+| **vector** | **0.905** | **0.727** |
+| hybrid (RRF) | 0.865 | 0.700 |
+
+**Vector search won on both metrics** and is used as the default in `rag/pipeline.py`. This was a genuine (if slightly counterintuitive) finding: RRF-hybrid diluted vector's stronger ranking with keyword's weaker one rather than improving on it here. Hybrid is still fully implemented and selectable in the app UI/`Retriever.search(method=...)` — the *best-search-method bonus* only requires evaluating hybrid, not that it wins.
+
+Full results: `data/retrieval_eval_results.json`. Reproduce with:
+```bash
+uv run python -m eval.generate_golden
+uv run python -m eval.retrieval_eval --top-k 5
+```
+
+## LLM evaluation
+
+Methodology (`eval/llm_eval.py`): for 40 sampled golden questions, retrieval is run once (vector, `top_k=5`), then **two prompt variants** answer from the same context:
+- `strict` — answer only from context, say so if the context doesn't have the answer
+- `open` — use context as primary source but may supplement with general knowledge
+
+An LLM-as-judge (`gpt-4o-mini`) scores each answer 1–5 on faithfulness + relevance.
+
+| variant | avg score | n |
+|---|---|---|
+| strict | 5.00 | 40 |
+| open | 5.00 | 40 |
+
+Both variants tie on this metric — expected, since golden questions are generated *from* their answer chunk, so both variants always have the answer available and neither needs to guess. The real difference shows up out-of-corpus: asking about "tête-bêche" (a term not covered by the current 400-article crawl), `strict` correctly answers *"I don't have enough information"* instead of inventing an answer from general knowledge. `strict` is kept as the deployed default for that reason.
+
+Full results: `data/llm_eval_results.json`. Reproduce with:
+```bash
+uv run python -m eval.llm_eval
+```
+
+## Interface
+
+Streamlit chat app (`app/streamlit_app.py`): message history, source links per answer, 👍/👎 feedback buttons, and a sidebar to switch retrieval method / prompt variant live (useful for demoing the evaluation above).
+
+## Ingestion pipeline
+
+Fully automated, one command, no manual steps:
+```bash
+uv run python ingestion/ingest.py
+```
+Crawls the configured Wikipedia categories, cleans wiki markup/boilerplate sections, chunks by section/paragraph, writes `data/chunks.jsonl`. See `ingestion/wikipedia_source.py` and `ingestion/chunking.py`.
+
+## Monitoring
+
+Every conversation (question, answer, retrieval method, prompt variant, model, latency, sources, 👍/👎) is logged to Postgres (`monitoring/db.py`). Grafana auto-provisions a dashboard (`monitoring/grafana/`) with **7 charts**:
+
+1. Requests over time
+2. Average latency
+3. Positive feedback %
+4. "No info" answer rate % (proxy for "retrieval found nothing relevant")
+5. Retrieval method breakdown
+6. Prompt variant breakdown
+7. Recent questions table
+
+No manual dashboard setup needed — datasource + dashboard are provisioned automatically on `docker compose up`. To see it populated with sample traffic:
+```bash
+uv run python -m eval.seed_monitoring
+```
+
+## Containerization
+
+`docker compose up` starts everything: `app` (Streamlit, built from the repo `Dockerfile`), `postgres`, `grafana`. No services need to be started separately.
+
+## Reproducibility / Setup
+
+Requirements: Python 3.11+, [uv](https://docs.astral.sh/uv/), Docker, an OpenAI API key.
+
+```bash
+git clone <this-repo>
+cd philately_assistant
+cp .env.example .env        # fill in OPENAI_API_KEY
+uv sync
+
+# 1. Build the corpus (takes ~4 min, ~400 Wikipedia API calls)
+uv run python ingestion/ingest.py
+
+# 2. (optional) reproduce the evaluation
+uv run python -m eval.generate_golden
+uv run python -m eval.retrieval_eval --top-k 5
+uv run python -m eval.llm_eval
+
+# 3. Run everything
+docker compose up -d
+```
+
+- App: http://localhost:8501
+- Grafana: http://localhost:3001 (admin/admin by default — see `.env.example`)
+- Postgres: localhost:5432
+
+All dependency versions are pinned in `uv.lock`. `data/chunks.jsonl` and `data/embeddings.npy` are generated by ingestion and gitignored — they are not shipped in the repo, only reproduced by running the pipeline above.
+
+## Best practices / bonus criteria
+
+- ✅ **Hybrid search** implemented and evaluated (`rag/retrieval.py`, RRF) — see [Retrieval evaluation](#retrieval-evaluation)
+- ⬜ Document re-ranking — not implemented
+- ⬜ Query rewriting — not implemented
+- ⬜ Cloud deployment — not implemented (runs locally via `docker compose up`)
+
+## Legal note
+
+Wikipedia content (CC BY-SA) is used with attribution — each answer links back to the source article(s) it was drawn from.
 
 ## Repository structure
 
 ```
-ingestion/   - scripts for collecting and chunking data (Wikipedia)
-rag/         - retrieval + prompt building + LLM calls
-app/         - Streamlit UI
-eval/        - retrieval/LLM evaluation
-monitoring/  - feedback logging, Grafana dashboard
-data/        - collected/processed data
-docker-compose.yml
+ingestion/   - Wikipedia crawl, cleaning, chunking
+rag/         - embeddings, keyword/vector/hybrid retrieval, prompt building, LLM calls, RAG pipeline
+app/         - Streamlit chat UI
+eval/        - golden set generation, retrieval eval, LLM eval, monitoring seed script
+monitoring/  - Postgres logging + Grafana provisioning/dashboard
+data/        - generated corpus, embeddings cache, eval results (gitignored except results)
+docker-compose.yml, Dockerfile
 ```
-
-## Quickstart
-
-_(to be filled in once the code exists)_
-
-1. `cp .env.example .env` and fill in the keys
-2. `uv sync`
-3. `uv run ingestion/ingest.py`
-4. `uv run streamlit run app/streamlit_app.py`

@@ -1,0 +1,21 @@
+{
+  "top_k": 5,
+  "n_questions": 200,
+  "results": [
+    {
+      "method": "keyword",
+      "hit_rate": 0.74,
+      "mrr": 0.5396666666666667
+    },
+    {
+      "method": "vector",
+      "hit_rate": 0.905,
+      "mrr": 0.72725
+    },
+    {
+      "method": "hybrid",
+      "hit_rate": 0.865,
+      "mrr": 0.6995
+    }
+  ]
+}

@@ -1,0 +1,154 @@
+{
+  "uid": "philately-assistant",
+  "title": "Philately Assistant",
+  "timezone": "browser",
+  "editable": true,
+  "schemaVersion": 39,
+  "version": 1,
+  "time": { "from": "now-7d", "to": "now" },
+  "refresh": "30s",
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Requests over time",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "philately_postgres" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "philately_postgres" },
+          "format": "time_series",
+          "rawSql": "SELECT date_trunc('hour', created_at) AS time, count(*) AS requests FROM conversations WHERE $__timeFilter(created_at) GROUP BY 1 ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Average latency (s)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "philately_postgres" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "philately_postgres" },
+          "format": "time_series",
+          "rawSql": "SELECT date_trunc('hour', created_at) AS time, avg(latency_seconds) AS avg_latency_seconds FROM conversations WHERE $__timeFilter(created_at) GROUP BY 1 ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Positive feedback %",
+      "gridPos": { "h": 8, "w": 6, "x": 0, "y": 8 },
+      "datasource": { "type": "postgres", "uid": "philately_postgres" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "orange", "value": 50 },
+              { "color": "green", "value": 75 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "philately_postgres" },
+          "format": "table",
+          "rawSql": "SELECT round(100.0 * sum(CASE WHEN feedback = 1 THEN 1 ELSE 0 END) / NULLIF(sum(CASE WHEN feedback IS NOT NULL THEN 1 ELSE 0 END), 0), 1) AS positive_pct FROM conversations WHERE $__timeFilter(created_at)"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "\"No info\" answer rate %",
+      "gridPos": { "h": 8, "w": 6, "x": 6, "y": 8 },
+      "datasource": { "type": "postgres", "uid": "philately_postgres" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 15 },
+              { "color": "red", "value": 30 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "philately_postgres" },
+          "format": "table",
+          "rawSql": "SELECT round(100.0 * sum(CASE WHEN answer ILIKE '%don''t have enough information%' THEN 1 ELSE 0 END) / NULLIF(count(*), 0), 1) AS no_answer_pct FROM conversations WHERE $__timeFilter(created_at)"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "piechart",
+      "title": "Retrieval method breakdown",
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 8 },
+      "datasource": { "type": "postgres", "uid": "philately_postgres" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "philately_postgres" },
+          "format": "table",
+          "rawSql": "SELECT retrieval_method, count(*) AS count FROM conversations WHERE $__timeFilter(created_at) GROUP BY 1"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "piechart",
+      "title": "Prompt variant breakdown",
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 8 },
+      "datasource": { "type": "postgres", "uid": "philately_postgres" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "philately_postgres" },
+          "format": "table",
+          "rawSql": "SELECT prompt_variant, count(*) AS count FROM conversations WHERE $__timeFilter(created_at) GROUP BY 1"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "table",
+      "title": "Recent questions",
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 16 },
+      "datasource": { "type": "postgres", "uid": "philately_postgres" },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "postgres", "uid": "philately_postgres" },
+          "format": "table",
+          "rawSql": "SELECT created_at AS time, question, retrieval_method, prompt_variant, model, round(latency_seconds::numeric, 2) AS latency_s, feedback FROM conversations WHERE $__timeFilter(created_at) ORDER BY created_at DESC LIMIT 50"
+        }
+      ]
+    }
+  ]
+}
