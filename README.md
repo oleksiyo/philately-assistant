@@ -16,7 +16,7 @@ Ingested automatically from the **Wikipedia API** (`ingestion/ingest.py`), start
 - `Category:Postage stamps by country`
 - `Category:Compendium of postage stamp issuers`
 
-Current corpus: **400 articles → 3,941 chunks** (chunked by section, then by paragraph groups up to ~1,200 characters), stored as `data/chunks.jsonl` with `{chunk_id, title, section, url, text}`. Content is CC BY-SA (Wikipedia) — see [Legal note](#legal-note).
+Current corpus: **400 articles → 3,941 chunks** (chunked by section, then by paragraph groups up to ~1,200 characters), stored as `data/chunks.jsonl` with `{chunk_id, title, section, url, text}`. Content is CC BY-SA (Wikipedia) — each answer links back to the source article(s) it was drawn from.
 
 **Known coverage gap**: the crawl is capped at 400 articles for corpus-size reasons, so some specific terminology (e.g. "tête-bêche" as its own article) isn't present — the assistant correctly declines to answer those rather than hallucinating (see [LLM evaluation](#llm-evaluation)).
 
@@ -256,13 +256,22 @@ Prints the public app/Grafana URLs when done. **Tear down when you're finished t
 
 A `t3.small` runs roughly $0.02/hour — remember to tear down; nothing here auto-stops the instance.
 
-## Best practices / bonus criteria
+## Next Steps
 
-- ✅ **Hybrid search** implemented and evaluated (`rag/retrieval.py`, RRF) — see [Retrieval evaluation](#retrieval-evaluation)
-- ✅ **Document re-ranking** implemented and evaluated (`rag/rerank.py`, cross-encoder) — on by default, clear win — see [Re-ranking & query rewriting](#re-ranking--query-rewriting-best-practice-bonuses)
-- ✅ **Query rewriting** implemented and evaluated (`rag/query_rewrite.py`) — toggleable, off by default per eval results — see [Re-ranking & query rewriting](#re-ranking--query-rewriting-best-practice-bonuses)
-- 🟡 **Cloud deployment** scripted (`deploy/`, AWS EC2 + the same `docker-compose.yml`) but **not run against a live AWS account** — see [Cloud Deployment](#cloud-deployment)
+Known gaps and ideas for improvement, roughly in order of impact:
 
-## Legal note
+**Data & retrieval**
+- Expand the corpus beyond 400 articles (raise `--max-articles`/`--max-depth` in `ingestion/ingest.py`) or add a second source (e.g. the Colnect API) — the current crawl misses some specific terminology (e.g. "tête-bêche" has no dedicated article), so the assistant correctly declines those questions rather than answering them.
+- The query-rewriting eval set (`data/golden_qa.jsonl`) is LLM-generated *from* the answer chunks, so it's already well-phrased — it can't really test whether rewriting helps with genuinely messy, conversational user phrasing. A small hand-written "messy query" eval set would give a fairer read on rewriting's real value (it's currently off by default based on the existing benchmark).
+- Minsearch's in-memory vector index is fine at ~4K chunks but won't scale past that without a rewrite — the course also covers PGVector (a production Postgres vector extension) as the next step up.
 
-Wikipedia content (CC BY-SA) is used with attribution — each answer links back to the source article(s) it was drawn from.
+**Cloud & ops**
+- `deploy/` has never been run against a live AWS account — worth doing once end-to-end, and adding an auto-shutdown (e.g. a cron `shutdown` on the instance after N idle hours) so a forgotten deployment doesn't rack up cost.
+- `rag/embeddings.py` and `rag/rerank.py` load their models lazily on first request, adding ~15–40s of cold-start latency to the very first query after a container starts. Pre-warming them at app startup (before the first user request) would remove that.
+- No CI (lint/tests on push) and no automated test suite — verification this session was all manual smoke tests against a live stack. A basic GitHub Actions workflow (ruff + a couple of pytest smoke tests against `rag/`) would catch regressions cheaply.
+- Course module 03 teaches Kestra for ingestion orchestration specifically; we used dlt instead (allowed by the grading rubric, but a Kestra flow wrapping the same `ingestion/ingest.py` logic would align more closely with what the course itself demonstrates).
+
+**Product**
+- Conversations are stateless — each question is answered independently, with no follow-up/multi-turn context threaded into retrieval or the prompt.
+- Screenshots of the running app and Grafana dashboard aren't in this README yet (needs a manual browser session to capture).
+
