@@ -202,13 +202,13 @@ uv run python -m eval.seed_monitoring
 
 ## How to Run Locally and via Docker
 
-Requirements: Python 3.11+, [uv](https://docs.astral.sh/uv/), Docker, an OpenAI API key.
+Requirements: Python 3.11+, [uv](https://docs.astral.sh/uv/), Docker, an OpenAI API key ([create one here](https://platform.openai.com/api-keys) — pay-as-you-go, needs a payment method on the account; this whole project costs a few cents to run).
 
 **Local Setup:**
 1. Clone the repository: `git clone <this-repo> && cd philately_assistant`
-2. Copy the env template and fill in your key: `cp .env.example .env` (set `OPENAI_API_KEY`)
+2. Copy the env template and fill in your key: `cp .env.example .env` (set `OPENAI_API_KEY`; the Postgres/Grafana defaults in there already match `docker-compose.yml`, no need to change them)
 3. Install dependencies: `uv sync`
-4. Build the corpus (takes ~4 min, ~400 Wikipedia API calls): `uv run python ingestion/ingest.py`
+4. Build the corpus (takes ~4 min, ~400 Wikipedia API calls, no key needed for this step): `uv run python ingestion/ingest.py`
 5. (optional) Reproduce the evaluation:
    ```bash
    uv run python -m eval.generate_golden
@@ -216,10 +216,15 @@ Requirements: Python 3.11+, [uv](https://docs.astral.sh/uv/), Docker, an OpenAI 
    uv run python -m eval.llm_eval
    uv run python -m eval.rerank_rewrite_eval
    ```
-6. Run the app directly (needs a local Postgres — see `docker-compose.yml` for the expected credentials, or just use Docker Execution below): `uv run streamlit run app/streamlit_app.py`
+6. Start just Postgres (the app needs it even outside Docker): `docker compose up -d postgres`
+7. Run the app directly: `uv run streamlit run app/streamlit_app.py`
 
 **Docker Execution:**
-1. Make sure `data/chunks.jsonl` exists (step 4 above) — the `app` container mounts `./data` rather than re-running ingestion itself
+1. Build the corpus first — either locally (`uv run python ingestion/ingest.py`, needs `uv` + Python) or fully through Docker with no local Python at all:
+   ```bash
+   docker compose --profile ingest run --rm ingest
+   ```
+   Either way this populates `data/chunks.jsonl`, which the `app` container mounts rather than regenerating itself.
 2. Build and start everything: `docker compose up -d --build`
 3. Check the app is healthy: `curl http://localhost:8501/_stcore/health`
 
