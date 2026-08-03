@@ -15,7 +15,18 @@ dependencies = [
     "psycopg2-binary",
     "scikit-learn",
     "sentence-transformers>=5.6.1",
+    "dlt>=1.29.1",
+    "duckdb>=1.5.5",
+    "torch",
 ]
 
 [tool.uv]
 package = false
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true

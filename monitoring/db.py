@@ -25,6 +25,8 @@ CREATE TABLE IF NOT EXISTS conversations (
     sources JSONB NOT NULL,
     feedback SMALLINT
 );
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS search_query TEXT;
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS reranked BOOLEAN;
 """
 
 
@@ -61,6 +63,8 @@ def log_conversation(
     model: str,
     latency_seconds: float,
     sources: list[dict],
+    search_query: str | None = None,
+    reranked: bool | None = None,
     created_at: datetime | None = None,
 ) -> int:
     with get_connection() as conn, conn.cursor() as cur:
@@ -68,8 +72,8 @@ def log_conversation(
             """
             INSERT INTO conversations
                 (question, answer, retrieval_method, prompt_variant, model,
-                 latency_seconds, sources, created_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, COALESCE(%s, now()))
+                 latency_seconds, sources, search_query, reranked, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, COALESCE(%s, now()))
             RETURNING id
             """,
             (
@@ -80,6 +84,8 @@ def log_conversation(
                 model,
                 latency_seconds,
                 json.dumps(sources),
+                search_query,
+                reranked,
                 created_at,
             ),
         )

@@ -1,0 +1,23 @@
+{
+  "method": "vector",
+  "top_k": 5,
+  "n_questions": 200,
+  "results": {
+    "baseline": {
+      "hit_rate": 0.905,
+      "mrr": 0.72725
+    },
+    "+rewrite": {
+      "hit_rate": 0.88,
+      "mrr": 0.691
+    },
+    "+rerank": {
+      "hit_rate": 0.96,
+      "mrr": 0.9216666666666667
+    },
+    "+rewrite+rerank": {
+      "hit_rate": 0.955,
+      "mrr": 0.9175
+    }
+  }
+}

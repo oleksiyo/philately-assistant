@@ -32,6 +32,11 @@ def render_sources(sources: list[dict]) -> None:
         st.markdown(f"- [{s['title']} — {s['section']}]({s['url']})")
 
 
+def render_search_query(question: str, search_query: str) -> None:
+    if search_query and search_query != question:
+        st.caption(f"🔎 Search query used: _{search_query}_")
+
+
 def render_feedback(conversation_id: int) -> None:
     key_prefix = f"feedback_{conversation_id}"
     if st.session_state.get(f"{key_prefix}_voted"):
@@ -60,6 +65,8 @@ def main() -> None:
         st.header("Settings")
         retrieval_method = st.selectbox("Retrieval method", ["vector", "hybrid", "keyword"])
         prompt_variant = st.selectbox("Prompt variant", ["strict", "open"])
+        use_query_rewrite = st.checkbox("Query rewriting", value=False)
+        use_rerank = st.checkbox("Re-ranking (cross-encoder)", value=True)
 
     if "history" not in st.session_state:
         st.session_state.history = []
@@ -69,6 +76,7 @@ def main() -> None:
             st.write(item["question"])
         with st.chat_message("assistant"):
             st.write(item["answer"])
+            render_search_query(item["question"], item["search_query"])
             with st.expander("Sources"):
                 render_sources(item["sources"])
             render_feedback(item["conversation_id"])
@@ -85,12 +93,15 @@ def main() -> None:
                         question,
                         retrieval_method=retrieval_method,
                         prompt_variant=prompt_variant,
+                        use_query_rewrite=use_query_rewrite,
+                        use_rerank=use_rerank,
                     )
                 except Exception as exc:
                     st.error(f"Error calling the LLM: {exc}")
                     return
 
             st.write(result.answer)
+            render_search_query(result.question, result.search_query)
             with st.expander("Sources"):
                 render_sources(result.sources)
 
@@ -102,6 +113,8 @@ def main() -> None:
                 model=result.model,
                 latency_seconds=result.latency_seconds,
                 sources=result.sources,
+                search_query=result.search_query,
+                reranked=result.reranked,
             )
 
             st.session_state.history.append(
@@ -109,6 +122,7 @@ def main() -> None:
                     "question": question,
                     "answer": result.answer,
                     "sources": result.sources,
+                    "search_query": result.search_query,
                     "conversation_id": conversation_id,
                 }
             )

@@ -75,6 +75,8 @@ def main() -> None:
             model=result.model,
             latency_seconds=result.latency_seconds,
             sources=result.sources,
+            search_query=result.search_query,
+            reranked=result.reranked,
             created_at=created_at,
         )
 

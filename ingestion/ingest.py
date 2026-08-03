@@ -1,5 +1,10 @@
 """Automated ingestion pipeline: Wikipedia categories -> chunked corpus.
 
+Orchestrated with dlt: article chunks are extracted as a dlt resource and
+loaded into a local DuckDB dataset (schema-managed, "replace" write
+disposition on each run), then exported to data/chunks.jsonl — the flat
+format the rest of the app (rag/, eval/) reads.
+
 Usage:
     uv run ingestion/ingest.py
     uv run ingestion/ingest.py --max-articles 50   # quick smoke test
@@ -11,6 +16,7 @@ import argparse
 import json
 from pathlib import Path
 
+import dlt
 from tqdm import tqdm
 
 from wikipedia_source import (
@@ -26,7 +32,7 @@ DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Ingest Wikipedia philately articles into a chunked corpus."
+        description="Ingest Wikipedia philately articles into a chunked corpus via a dlt pipeline."
     )
     parser.add_argument("--categories", nargs="+", default=DEFAULT_CATEGORIES)
     parser.add_argument("--max-depth", type=int, default=2)
@@ -34,6 +40,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--language", default="en")
     parser.add_argument("--out", default=str(DATA_DIR / "chunks.jsonl"))
     return parser.parse_args()
+
+
+@dlt.resource(name="chunks", write_disposition="replace")
+def wikipedia_chunks(wiki, titles: list[str]):
+    for title in tqdm(titles, desc="Fetching + chunking"):
+        article = fetch_article(wiki, title)
+        if article is None:
+            continue
+        yield from chunk_article(article)
 
 
 def main() -> None:
@@ -49,25 +64,42 @@ def main() -> None:
     )
     print(f"Found {len(titles)} candidate articles")
 
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    pipeline = dlt.pipeline(
+        pipeline_name="philately_ingestion",
+        destination=dlt.destinations.duckdb(str(DATA_DIR / "philately.duckdb")),
+        dataset_name="raw_chunks",
+    )
+    load_info = pipeline.run(wikipedia_chunks(wiki, sorted(titles)))
+    print(load_info)
+
+    with pipeline.sql_client() as client:
+        with client.execute_query(
+            "SELECT chunk_id, title, section, url, text FROM chunks"
+        ) as cursor:
+            rows = cursor.fetchall()
+
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-
-    n_articles = 0
-    n_chunks = 0
+    n_articles = set()
     with out_path.open("w", encoding="utf-8") as f:
-        for title in tqdm(sorted(titles), desc="Fetching + chunking"):
-            article = fetch_article(wiki, title)
-            if article is None:
-                continue
-            chunks = chunk_article(article)
-            if not chunks:
-                continue
-            n_articles += 1
-            n_chunks += len(chunks)
-            for chunk in chunks:
-                f.write(json.dumps(chunk, ensure_ascii=False) + "\n")
+        for chunk_id, title, section, url, text in rows:
+            f.write(
+                json.dumps(
+                    {
+                        "chunk_id": chunk_id,
+                        "title": title,
+                        "section": section,
+                        "url": url,
+                        "text": text,
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+            n_articles.add(title)
 
-    print(f"Ingested {n_articles} articles into {n_chunks} chunks -> {out_path}")
+    print(f"Ingested {len(n_articles)} articles into {len(rows)} chunks -> {out_path}")
 
 
 if __name__ == "__main__":

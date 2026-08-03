@@ -40,7 +40,13 @@ keyword index    vector index
       │              │
       └──────┬───────┘
              ▼
+   rag/query_rewrite.py — LLM query rewrite (optional, off by default)
+             │
+             ▼
    rag/retrieval.py — keyword / vector / hybrid (RRF)
+             │
+             ▼
+   rag/rerank.py — cross-encoder re-rank of top-20 → top-5 (on by default)
              │
              ▼
    rag/prompt.py — "strict" vs "open" system prompt
@@ -80,6 +86,27 @@ uv run python -m eval.generate_golden
 uv run python -m eval.retrieval_eval --top-k 5
 ```
 
+### Re-ranking & query rewriting (best-practice bonuses)
+
+On top of the winning `vector` method, `eval/rerank_rewrite_eval.py` ablates two more techniques on the same 200-question golden set:
+
+- **Query rewriting** (`rag/query_rewrite.py`): an LLM reformulates the question into a cleaner standalone search query before retrieval.
+- **Re-ranking** (`rag/rerank.py`): retrieve a larger candidate pool (20) with `vector`, then a local cross-encoder (`cross-encoder/ms-marco-MiniLM-L-6-v2`) rescores and cuts down to `top_k=5`.
+
+| variant | hit-rate | MRR |
+|---|---|---|
+| baseline (vector) | 0.905 | 0.727 |
+| +rewrite | 0.880 | 0.691 |
+| **+rerank** | **0.960** | **0.922** |
+| +rewrite+rerank | 0.955 | 0.917 |
+
+**Re-ranking is a clear, substantial win** and is on by default in `rag/pipeline.py`. **Query rewriting alone slightly *hurt*** MRR here — the golden questions were LLM-generated directly from their answer chunk, so they already closely match its wording, and rewriting drifts the query away from that precise phrasing. It's implemented and toggleable in the app/pipeline (satisfying the practice), but kept **off by default** based on this measured result; it may still help with genuinely messy conversational phrasing that this benchmark doesn't simulate.
+
+Full results: `data/rerank_rewrite_eval_results.json`. Reproduce with:
+```bash
+uv run python -m eval.rerank_rewrite_eval
+```
+
 ## LLM evaluation
 
 Methodology (`eval/llm_eval.py`): for 40 sampled golden questions, retrieval is run once (vector, `top_k=5`), then **two prompt variants** answer from the same context:
@@ -102,15 +129,15 @@ uv run python -m eval.llm_eval
 
 ## Interface
 
-Streamlit chat app (`app/streamlit_app.py`): message history, source links per answer, 👍/👎 feedback buttons, and a sidebar to switch retrieval method / prompt variant live (useful for demoing the evaluation above).
+Streamlit chat app (`app/streamlit_app.py`): message history, source links per answer, 👍/👎 feedback buttons, and a sidebar to switch retrieval method / prompt variant / query rewriting / re-ranking live (useful for demoing the evaluations above). The rewritten search query is shown under the answer when it differs from what you typed.
 
 ## Ingestion pipeline
 
-Fully automated, one command, no manual steps:
+Fully automated, one command, no manual steps, orchestrated with **[dlt](https://dlthub.com/)**:
 ```bash
 uv run python ingestion/ingest.py
 ```
-Crawls the configured Wikipedia categories, cleans wiki markup/boilerplate sections, chunks by section/paragraph, writes `data/chunks.jsonl`. See `ingestion/wikipedia_source.py` and `ingestion/chunking.py`.
+Crawls the configured Wikipedia categories (`ingestion/wikipedia_source.py`), cleans wiki markup/boilerplate sections and chunks by section/paragraph (`ingestion/chunking.py`), then a dlt resource (`ingestion/ingest.py::wikipedia_chunks`) loads the chunks into a local DuckDB dataset (`data/philately.duckdb`, schema-managed, `write_disposition="replace"`), which is exported to `data/chunks.jsonl` — the flat format the rest of the app reads.
 
 ## Monitoring
 
@@ -164,8 +191,8 @@ All dependency versions are pinned in `uv.lock`. `data/chunks.jsonl` and `data/e
 ## Best practices / bonus criteria
 
 - ✅ **Hybrid search** implemented and evaluated (`rag/retrieval.py`, RRF) — see [Retrieval evaluation](#retrieval-evaluation)
-- ⬜ Document re-ranking — not implemented
-- ⬜ Query rewriting — not implemented
+- ✅ **Document re-ranking** implemented and evaluated (`rag/rerank.py`, cross-encoder) — on by default, clear win — see [Re-ranking & query rewriting](#re-ranking--query-rewriting-best-practice-bonuses)
+- ✅ **Query rewriting** implemented and evaluated (`rag/query_rewrite.py`) — toggleable, off by default per eval results — see [Re-ranking & query rewriting](#re-ranking--query-rewriting-best-practice-bonuses)
 - ⬜ Cloud deployment — not implemented (runs locally via `docker compose up`)
 
 ## Legal note
